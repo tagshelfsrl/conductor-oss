@@ -187,14 +187,7 @@ public class Monitors {
     public static void recordSystemTaskPhase(
             String taskType, String phase, String outcome, long durationNanos) {
         try {
-            getTimer(
-                            "system_task_phase",
-                            "taskType",
-                            taskType,
-                            "phase",
-                            phase,
-                            "outcome",
-                            outcome)
+            getTimer("system_task_phase", "taskType", taskType, "phase", phase, "outcome", outcome)
                     .record(durationNanos, TimeUnit.NANOSECONDS);
         } catch (RuntimeException ignored) {
             // Observability must not prevent execution or turn a successful queue removal into
@@ -217,8 +210,7 @@ public class Monitors {
             recordSystemTaskPhase(taskType, "poll", outcome, durationNanos);
             getDistributionSummary("system_task_available_slots", "taskType", taskType)
                     .record(Math.max(0, availableSlots));
-            getDistributionSummary("system_task_poll_batch", "taskType", taskType)
-                    .record(polled);
+            getDistributionSummary("system_task_poll_batch", "taskType", taskType).record(polled);
         } catch (RuntimeException ignored) {
             // Poll capacity is observed without scanning queues or adding datastore requests.
         }
