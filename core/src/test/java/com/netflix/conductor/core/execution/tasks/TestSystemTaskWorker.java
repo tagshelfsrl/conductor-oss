@@ -405,7 +405,8 @@ public class TestSystemTaskWorker {
         systemTaskWorker.pollAndExecute(new IsolatedTask(), ISOLATED_TASK);
         latch.await();
 
-        verify(asyncSystemTaskExecutor, Mockito.times(1)).execute(any(), eq("isolated_taskId"), eq(ISOLATED_TASK));
+        verify(asyncSystemTaskExecutor, Mockito.times(1))
+                .execute(any(), eq("isolated_taskId"), eq(ISOLATED_TASK));
     }
 
     // -----------------------------------------------------------------------
@@ -649,7 +650,8 @@ public class TestSystemTaskWorker {
         systemTaskWorker.pollAndExecute(new TestTask(), TEST_TASK);
 
         verify(queueDAO).resetOffsetTime(TEST_TASK, "late-task");
-        verify(asyncSystemTaskExecutor, Mockito.never()).execute(any(), eq("late-task"), eq(TEST_TASK));
+        verify(asyncSystemTaskExecutor, Mockito.never())
+                .execute(any(), eq("late-task"), eq(TEST_TASK));
     }
 
     // -----------------------------------------------------------------------

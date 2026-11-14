@@ -26,7 +26,6 @@ import com.netflix.conductor.dao.MetadataDAO
 import com.netflix.conductor.dao.QueueDAO
 import com.netflix.conductor.model.TaskModel
 import com.netflix.conductor.model.WorkflowModel
-
 import com.netflix.spectator.api.DefaultRegistry
 import com.netflix.spectator.api.Spectator
 
