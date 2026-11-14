@@ -22,8 +22,10 @@ databases, queues, migrations, or integration tests. The image uses upstream's
 PostgreSQL persistence modules and server configuration.
 
 Trusted branch pushes and manual runs publish a Linux amd64 candidate image to
-`ghcr.io/tagshelfsrl/conductor-oss:3.32.4-tagshelf-<full commit SHA>` using the
-repository's short-lived GitHub token. Pull requests validate without publishing.
+`us-east1-docker.pkg.dev/tagshelf/tagshelfsrl/conductor-oss:3.32.4-tagshelf-<full commit SHA>`
+using the existing organization Workload Identity Federation provider and registry
+writer service account. Pull requests validate without publishing or requesting
+Google credentials. No IAM grants or organization secrets are added.
 The build summary records its immutable image digest. The build sets
 `-Pversion=3.32.4` to identify the upstream release; it does not edit the
 checked-in component version. Changes to this branch must retain the focused
@@ -32,10 +34,10 @@ test selection until broader tests can run within the workspace database policy.
 Inherited upstream workflows are retained in `.github/upstream-workflows` as
 reference. They are outside GitHub's workflow directory because their publishing
 credentials, schedules, and database integration tests do not belong to this fork.
-The fork does not use private organization registry credentials.
+The fork does not use stored organization registry credentials.
 
-Before deployment, verify that the candidate package is publicly pullable or
-promote the built image to the existing deployment registry. Pin the tested
-digest in the staging GitOps overlay. Production continues to use the official
+Pin the tested image digest in the staging GitOps overlay. The image is published
+to the existing deployment registry using its existing access rules.
+Production continues to use the official
 image until the staging behavior and timing results have been reviewed. Building
 an image does not deploy it or establish a latency improvement.

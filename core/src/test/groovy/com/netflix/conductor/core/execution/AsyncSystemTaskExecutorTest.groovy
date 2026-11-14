@@ -24,12 +24,12 @@ import com.netflix.conductor.core.utils.ParametersUtils
 import com.netflix.conductor.core.utils.QueueUtils
 import com.netflix.conductor.dao.MetadataDAO
 import com.netflix.conductor.dao.QueueDAO
+import com.netflix.conductor.metrics.Monitors
 import com.netflix.conductor.model.TaskModel
 import com.netflix.conductor.model.WorkflowModel
-import com.netflix.spectator.api.DefaultRegistry
-import com.netflix.spectator.api.Spectator
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import spock.lang.Specification
 import spock.lang.Subject
 
@@ -124,8 +124,8 @@ class AsyncSystemTaskExecutorTest extends Specification {
 
     def "First evaluation is observed once after repeated concurrency deferrals"() {
         given:
-        def registry = new DefaultRegistry()
-        Spectator.globalRegistry().add(registry)
+        def registry = new SimpleMeterRegistry()
+        Monitors.addMeterRegistry(registry)
         def task = new TaskModel(taskId: "deferred", taskType: "JOIN", workflowInstanceId: "workflow",
                 status: TaskModel.Status.SCHEDULED, scheduledTime: System.currentTimeMillis() - 1000)
         def workflow = new WorkflowModel(workflowId: "workflow", status: WorkflowModel.Status.RUNNING)
@@ -134,7 +134,7 @@ class AsyncSystemTaskExecutorTest extends Specification {
         executionDAOFacade.getWorkflowModel("workflow", _) >> workflow
         executionDAOFacade.exceedsInProgressLimit(task) >>> [true, true, false]
         workflowSystemTask.start(*_) >> { task.status = TaskModel.Status.IN_PROGRESS }
-        def timer = registry.timer("system_task_first_evaluation_delay", "class", "WorkflowMonitor", "taskType", "JOIN")
+        def timer = registry.timer("system_task_first_evaluation_delay", "taskType", "JOIN")
 
         when:
         executor.execute(workflowSystemTask, "deferred", "JOIN")
@@ -159,7 +159,7 @@ class AsyncSystemTaskExecutorTest extends Specification {
         task.pollCount == 2
 
         cleanup:
-        Spectator.globalRegistry().remove(registry)
+        Monitors.getRegistry().remove(registry)
     }
 
     def "Remove an absent task only from the exact polled queue"() {

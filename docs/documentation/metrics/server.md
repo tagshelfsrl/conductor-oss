@@ -79,7 +79,7 @@ outcomes distinguish `completed` and `failed`. Evaluation includes the existing
 workflow lookup, system-task execution, queue update, persistence and decision,
 and is labelled with the resulting task status. Poll outcomes are `empty`,
 `acquired`, `limited` or `failed`. Timers use nanoseconds internally and the
-existing Spectator exporter controls display units. No task or workflow ids are
+existing Micrometer exporter controls display units. No task or workflow ids are
 metric labels, and metrics failures do not alter processing.
 
 `JOIN.startTime` is set by its mapper and is not an executor pickup timestamp.
