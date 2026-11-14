@@ -24,10 +24,12 @@ import com.netflix.conductor.core.utils.ParametersUtils
 import com.netflix.conductor.core.utils.QueueUtils
 import com.netflix.conductor.dao.MetadataDAO
 import com.netflix.conductor.dao.QueueDAO
+import com.netflix.conductor.metrics.Monitors
 import com.netflix.conductor.model.TaskModel
 import com.netflix.conductor.model.WorkflowModel
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import spock.lang.Specification
 import spock.lang.Subject
 
@@ -117,6 +119,83 @@ class AsyncSystemTaskExecutorTest extends Specification {
         1 * executionDAOFacade.getTaskModel(taskId) >> null
         0 * workflowSystemTask.start(*_)
         0 * executionDAOFacade.updateTask(_)
+        0 * queueDAO.remove(*_)
+    }
+
+    def "First evaluation is observed once after repeated concurrency deferrals"() {
+        given:
+        def registry = new SimpleMeterRegistry()
+        Monitors.addMeterRegistry(registry)
+        def task = new TaskModel(taskId: "deferred", taskType: "JOIN", workflowInstanceId: "workflow",
+                status: TaskModel.Status.SCHEDULED, scheduledTime: System.currentTimeMillis() - 1000)
+        def workflow = new WorkflowModel(workflowId: "workflow", status: WorkflowModel.Status.RUNNING)
+        workflowSystemTask.getTaskType() >> "JOIN"
+        executionDAOFacade.getTaskModel("deferred") >> task
+        executionDAOFacade.getWorkflowModel("workflow", _) >> workflow
+        executionDAOFacade.exceedsInProgressLimit(task) >>> [true, true, false]
+        workflowSystemTask.start(*_) >> { task.status = TaskModel.Status.IN_PROGRESS }
+        def timer = registry.timer("system_task_first_evaluation_delay", "taskType", "JOIN")
+
+        when:
+        executor.execute(workflowSystemTask, "deferred", "JOIN")
+        executor.execute(workflowSystemTask, "deferred", "JOIN")
+
+        then:
+        timer.count() == 0
+        task.pollCount == 0
+
+        when:
+        executor.execute(workflowSystemTask, "deferred", "JOIN")
+
+        then:
+        timer.count() == 1
+        task.pollCount == 1
+
+        when:
+        executor.execute(workflowSystemTask, "deferred", "JOIN")
+
+        then:
+        timer.count() == 1
+        task.pollCount == 2
+
+        cleanup:
+        Monitors.getRegistry().remove(registry)
+    }
+
+    def "Remove an absent task only from the exact polled queue"() {
+        given:
+        String queue = "JOIN@isolated-namespace"
+
+        when:
+        executor.execute(workflowSystemTask, "missing", queue)
+
+        then:
+        1 * executionDAOFacade.getTaskModel("missing") >> null
+        1 * queueDAO.remove(queue, "missing")
+        0 * executionDAOFacade.updateTask(_)
+        0 * workflowSystemTask.start(*_)
+    }
+
+    def "Keep the polled reference when a lookup throws"() {
+        when:
+        executor.execute(workflowSystemTask, "retry", "JOIN")
+
+        then:
+        1 * executionDAOFacade.getTaskModel("retry") >> { throw new RuntimeException("unavailable") }
+        0 * queueDAO.remove(*_)
+        0 * executionDAOFacade.updateTask(_)
+    }
+
+    def "A failed orphan removal does not execute or update a missing task"() {
+        when:
+        executor.execute(workflowSystemTask, "missing", "JOIN")
+
+        then:
+        1 * executionDAOFacade.getTaskModel("missing") >> null
+        1 * queueDAO.remove("JOIN", "missing") >> { throw new RuntimeException("unavailable") }
+        0 * executionDAOFacade.updateTask(_)
+        0 * workflowSystemTask.start(*_)
+        noExceptionThrown()
     }
 
     def "Execute with a task id that fails to load"() {
@@ -130,6 +209,7 @@ class AsyncSystemTaskExecutorTest extends Specification {
         1 * executionDAOFacade.getTaskModel(taskId) >> { throw new RuntimeException("datastore unavailable") }
         0 * workflowSystemTask.start(*_)
         0 * executionDAOFacade.updateTask(_)
+        0 * queueDAO.remove(*_)
     }
 
     def "Execute with a task id that is in terminal state"() {

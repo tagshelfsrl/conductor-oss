@@ -211,12 +211,12 @@ public class TestSystemTaskWorker {
                             return null;
                         })
                 .when(asyncSystemTaskExecutor)
-                .execute(any(), anyString());
+                .execute(any(), anyString(), anyString());
 
         systemTaskWorker.pollAndExecute(new TestTask(), TEST_TASK);
         latch.await();
 
-        verify(asyncSystemTaskExecutor).execute(any(), anyString());
+        verify(asyncSystemTaskExecutor).execute(any(), eq("taskId"), eq(TEST_TASK));
         // The poll must not remove the message (issue #1321) — the executor reserves it instead.
         verify(queueDAO, Mockito.never()).ack(anyString(), anyString());
         verify(queueDAO, Mockito.never()).remove(anyString(), anyString());
@@ -233,12 +233,12 @@ public class TestSystemTaskWorker {
                             return null;
                         })
                 .when(asyncSystemTaskExecutor)
-                .execute(any(), anyString());
+                .execute(any(), anyString(), anyString());
 
         systemTaskWorker.pollAndExecute(new TestTask(), TEST_TASK);
         latch.await();
 
-        verify(asyncSystemTaskExecutor, Mockito.times(2)).execute(any(), anyString());
+        verify(asyncSystemTaskExecutor, Mockito.times(2)).execute(any(), anyString(), anyString());
     }
 
     @Test
@@ -260,7 +260,7 @@ public class TestSystemTaskWorker {
                             return null;
                         })
                 .when(asyncSystemTaskExecutor)
-                .execute(any(), anyString());
+                .execute(any(), anyString(), anyString());
 
         int permitsBefore =
                 systemTaskWorker.getExecutionConfig(TEST_TASK).getSemaphoreUtil().availableSlots();
@@ -293,7 +293,7 @@ public class TestSystemTaskWorker {
                 "No permits should be acquired when poll returns empty",
                 permitsBefore,
                 systemTaskWorker.getExecutionConfig(TEST_TASK).getSemaphoreUtil().availableSlots());
-        verify(asyncSystemTaskExecutor, Mockito.never()).execute(any(), anyString());
+        verify(asyncSystemTaskExecutor, Mockito.never()).execute(any(), anyString(), anyString());
     }
 
     @Test
@@ -308,7 +308,7 @@ public class TestSystemTaskWorker {
                 "Poll exception must not consume any permits",
                 permitsBefore,
                 systemTaskWorker.getExecutionConfig(TEST_TASK).getSemaphoreUtil().availableSlots());
-        verify(asyncSystemTaskExecutor, Mockito.never()).execute(any(), anyString());
+        verify(asyncSystemTaskExecutor, Mockito.never()).execute(any(), anyString(), anyString());
     }
 
     @Test
@@ -324,7 +324,7 @@ public class TestSystemTaskWorker {
                             return null;
                         })
                 .when(asyncSystemTaskExecutor)
-                .execute(any(), anyString());
+                .execute(any(), anyString(), anyString());
 
         // The executor rejects the first submission (t1) and accepts the second (t2) — the real
         // trigger for the dispatch loop's catch block is a RejectedExecutionException from a
@@ -386,7 +386,7 @@ public class TestSystemTaskWorker {
                 "All permits must be released when every dispatch fails",
                 permitsBefore,
                 flakyConfig.getSemaphoreUtil().availableSlots());
-        verify(asyncSystemTaskExecutor, Mockito.never()).execute(any(), anyString());
+        verify(asyncSystemTaskExecutor, Mockito.never()).execute(any(), anyString(), anyString());
     }
 
     @Test
@@ -400,12 +400,13 @@ public class TestSystemTaskWorker {
                             return null;
                         })
                 .when(asyncSystemTaskExecutor)
-                .execute(any(), eq("isolated_taskId"));
+                .execute(any(), eq("isolated_taskId"), eq(ISOLATED_TASK));
 
         systemTaskWorker.pollAndExecute(new IsolatedTask(), ISOLATED_TASK);
         latch.await();
 
-        verify(asyncSystemTaskExecutor, Mockito.times(1)).execute(any(), eq("isolated_taskId"));
+        verify(asyncSystemTaskExecutor, Mockito.times(1))
+                .execute(any(), eq("isolated_taskId"), eq(ISOLATED_TASK));
     }
 
     // -----------------------------------------------------------------------
@@ -445,7 +446,7 @@ public class TestSystemTaskWorker {
                             return null;
                         })
                 .when(asyncSystemTaskExecutor)
-                .execute(any(), anyString());
+                .execute(any(), anyString(), anyString());
 
         SemaphoreUtil isoDSemaphore =
                 systemTaskWorker.getExecutionConfig(ISOLATED_TASK).getSemaphoreUtil();
@@ -494,7 +495,7 @@ public class TestSystemTaskWorker {
                             return null;
                         })
                 .when(asyncSystemTaskExecutor)
-                .execute(any(), anyString());
+                .execute(any(), anyString(), anyString());
 
         // First poll: 2 tasks dispatched, semaphore exhausted.
         systemTaskWorker.pollAndExecute(new TestTask(), TEST_TASK);
@@ -562,7 +563,7 @@ public class TestSystemTaskWorker {
         verify(queueDAO).resetOffsetTime(TEST_TASK, "r1");
         verify(queueDAO).resetOffsetTime(TEST_TASK, "r2");
         // Nothing should have been dispatched.
-        verify(asyncSystemTaskExecutor, Mockito.never()).execute(any(), anyString());
+        verify(asyncSystemTaskExecutor, Mockito.never()).execute(any(), anyString(), anyString());
     }
 
     // -----------------------------------------------------------------------
@@ -649,7 +650,8 @@ public class TestSystemTaskWorker {
         systemTaskWorker.pollAndExecute(new TestTask(), TEST_TASK);
 
         verify(queueDAO).resetOffsetTime(TEST_TASK, "late-task");
-        verify(asyncSystemTaskExecutor, Mockito.never()).execute(any(), eq("late-task"));
+        verify(asyncSystemTaskExecutor, Mockito.never())
+                .execute(any(), eq("late-task"), eq(TEST_TASK));
     }
 
     // -----------------------------------------------------------------------
@@ -671,7 +673,7 @@ public class TestSystemTaskWorker {
                             return null;
                         })
                 .when(asyncSystemTaskExecutor)
-                .execute(any(), anyString());
+                .execute(any(), anyString(), anyString());
 
         systemTaskWorker.startPolling(new TestTask(), TEST_TASK);
 
@@ -729,7 +731,7 @@ public class TestSystemTaskWorker {
                             return null;
                         })
                 .when(asyncSystemTaskExecutor)
-                .execute(any(), anyString());
+                .execute(any(), anyString(), anyString());
         when(queueDAO.pop(anyString(), anyInt(), anyInt())).thenReturn(List.of("post-restart"));
 
         assertTrue(
