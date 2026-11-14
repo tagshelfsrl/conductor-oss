@@ -68,24 +68,76 @@ public class AsyncSystemTaskExecutor {
      * @param taskId The id of the {@link TaskModel} object.
      */
     public void execute(WorkflowSystemTask systemTask, String taskId) {
-        TaskModel task = loadTaskQuietly(taskId);
+        execute(systemTask, taskId, null);
+    }
+
+    /** The polled queue is required to retire a reference whose task no longer exists. */
+    public void execute(WorkflowSystemTask systemTask, String taskId, String polledQueue) {
+        long started = System.nanoTime();
+        TaskModel task;
+        try {
+            task = executionDAOFacade.getTaskModel(taskId);
+        } catch (Exception e) {
+            Monitors.recordSystemTaskPhase(
+                    systemTask.getTaskType(), "load", "failed", System.nanoTime() - started);
+            // A failed lookup is not evidence of an absent task. Leave the reference for retry.
+            LOGGER.warn(
+                    "Could not load system task {} from queue {}; leaving it for retry ({})",
+                    taskId,
+                    polledQueue,
+                    e.getClass().getSimpleName());
+            return;
+        }
+        Monitors.recordSystemTaskPhase(
+                systemTask.getTaskType(),
+                "load",
+                task == null ? "missing" : "found",
+                System.nanoTime() - started);
         if (task == null) {
-            LOGGER.error("TaskId: {} could not be found while executing {}", taskId, systemTask);
+            if (polledQueue == null) {
+                LOGGER.warn(
+                        "TaskId: {} is absent; no polled queue was supplied for cleanup", taskId);
+                return;
+            }
+            long removeStarted = System.nanoTime();
             try {
-                LOGGER.debug(
-                        "Cleaning up dead task from queue message: taskQueue={}, taskId={}",
+                // Use the exact queue, including namespace/isolation, rather than guessing from
+                // the system task type. There is no TaskModel from which to reconstruct it.
+                queueDAO.remove(polledQueue, taskId);
+                Monitors.recordSystemTaskPhase(
                         systemTask.getTaskType(),
-                        taskId);
-                queueDAO.remove(systemTask.getTaskType(), taskId);
+                        "orphan_remove",
+                        "completed",
+                        System.nanoTime() - removeStarted);
+                LOGGER.info("Removed absent system task {} from queue {}", taskId, polledQueue);
             } catch (Exception e) {
-                LOGGER.error(
-                        "Failed to remove dead task from queue message: taskQueue={}, taskId={}",
+                Monitors.recordSystemTaskPhase(
                         systemTask.getTaskType(),
-                        taskId);
+                        "orphan_remove",
+                        "failed",
+                        System.nanoTime() - removeStarted);
+                LOGGER.warn(
+                        "Could not remove absent system task {} from queue {}; leaving it for retry ({})",
+                        taskId,
+                        polledQueue,
+                        e.getClass().getSimpleName());
             }
             return;
         }
 
+        long executionStarted = System.nanoTime();
+        try {
+            executeLoadedTask(systemTask, task, taskId);
+        } finally {
+            Monitors.recordSystemTaskPhase(
+                    systemTask.getTaskType(),
+                    "evaluate",
+                    task.getStatus() == null ? "unknown" : task.getStatus().name(),
+                    System.nanoTime() - executionStarted);
+        }
+    }
+
+    private void executeLoadedTask(WorkflowSystemTask systemTask, TaskModel task, String taskId) {
         LOGGER.debug("Task: {} fetched from execution DAO for taskId: {}", task, taskId);
         String queueName = QueueUtils.getQueueName(task);
         if (task.getStatus().isTerminal()) {
@@ -150,7 +202,28 @@ public class AsyncSystemTaskExecutor {
 
             boolean isTaskAsyncComplete = systemTask.isAsyncComplete(task);
             if (task.getStatus() == TaskModel.Status.SCHEDULED || !isTaskAsyncComplete) {
+                boolean firstEvaluation = task.getPollCount() == 0;
                 task.incrementPollCount();
+                // Use the existing persisted counter: limited polls return before this point
+                // and must not produce repeated "first evaluation" samples.
+                if (firstEvaluation && task.getScheduledTime() > 0) {
+                    long firstEvaluationTime = System.currentTimeMillis();
+                    long firstEvaluationDelay = firstEvaluationTime - task.getScheduledTime();
+                    Monitors.recordSystemTaskFirstEvaluationDelay(
+                            systemTask.getTaskType(), Math.max(0, firstEvaluationDelay));
+                    try {
+                        LOGGER.info(
+                                "System task first evaluation. schemaVersion=1 taskId={} workflowId={} taskType={} scheduledTime={} firstEvaluationTime={} scheduledToFirstEvaluationMs={}",
+                                taskId,
+                                workflowId,
+                                task.getTaskType(),
+                                task.getScheduledTime(),
+                                firstEvaluationTime,
+                                firstEvaluationDelay);
+                    } catch (RuntimeException ignored) {
+                        // The correlation log is observational, like the metrics above.
+                    }
+                }
             }
 
             boolean scheduled = task.getStatus() == TaskModel.Status.SCHEDULED;
@@ -311,11 +384,4 @@ public class AsyncSystemTaskExecutor {
         }
     }
 
-    private TaskModel loadTaskQuietly(String taskId) {
-        try {
-            return executionDAOFacade.getTaskModel(taskId);
-        } catch (Exception e) {
-            return null;
-        }
-    }
 }

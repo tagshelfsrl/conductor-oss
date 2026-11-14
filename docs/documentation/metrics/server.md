@@ -19,6 +19,10 @@ The following metrics are published by the Conductor server. You can export thes
 | workflow_running | The number of running workflows.                          | workflowName, version|
 | workflow_execution | The time taken for workflow completion.                 | workflowName, ownerApp |
 | task_queue_wait | The amount of time spent by a task in queue.               | taskType |
+| system_task_first_evaluation_delay | Scheduled timestamp to first system-task executor evaluation, milliseconds at recording | taskType |
+| system_task_phase | Monotonic time spent loading, evaluating, polling or retiring an absent system task; timer count also records outcomes | taskType, phase, outcome |
+| system_task_available_slots | Distribution of available executor slots at each system-task poll | taskType |
+| system_task_poll_batch | Distribution of task references returned by a system-task poll | taskType |
 | task_execution | The time taken to execute a task.                           | taskType, includeRetries, status |
 | task_poll | The time taken to poll for a task.                               | taskType|
 | task_poll_count | The number of times the task is being polled.              | taskType, domain |
@@ -55,3 +59,44 @@ Conductor supports the following Micrometer publishers:
 ### Enabling metrics collection
 
 To enable metrics collection to a particular monitoring system, refer to the [Micrometer documentation](https://docs.micrometer.io/micrometer/reference/implementations.html) complete the implementation. You will also need to enable the particular monitoring system in the Conductor's [`application.properties` file](https://github.com/conductor-oss/conductor/blob/6147d61d1babf47f5a0a328d114f1eb5d3d5ecb1/server/src/main/resources/application.properties#L163).
+
+## System-task scheduling and absent tasks
+
+The system-task worker supplies the exact polled queue to its executor, including
+namespace and isolation suffixes. When the authoritative task lookup returns
+null, the executor removes that reference from that queue. A lookup that throws
+leaves the reference intact for retry; it is never treated as proof that a task
+is absent. Failed removals remain retryable. This applies only to individually
+polled references and performs no bulk scan, purge or workflow deletion.
+
+The two-argument executor entry point remains compatible, but cannot retire an
+absent task without its queue identity. Loaded tasks keep their existing
+execution, callback, persistence and workflow-decision behavior.
+
+`system_task_phase` has static phases `load`, `orphan_remove`, `evaluate` and
+`poll`. Lookup outcomes distinguish `found`, `missing` and `failed`; removal
+outcomes distinguish `completed` and `failed`. Evaluation includes the existing
+workflow lookup, system-task execution, queue update, persistence and decision,
+and is labelled with the resulting task status. Poll outcomes are `empty`,
+`acquired`, `limited` or `failed`. Timers use nanoseconds internally and the
+existing Spectator exporter controls display units. No task or workflow ids are
+metric labels, and metrics failures do not alter processing.
+
+`JOIN.startTime` is set by its mapper and is not an executor pickup timestamp.
+Use `system_task_first_evaluation_delay` to observe initial scheduling latency
+when the existing poll counter first advances after admission checks,
+and compare JOIN completion with the completion of its joined branches to
+measure residual wait. First-evaluation delay uses server wall-clock timestamps;
+phase durations use a local monotonic clock. Negative wall-clock differences
+are clamped to zero for the timer. Callback duration is a recheck
+delay, not an upper bound on queue residence or total JOIN latency.
+Concurrency/rate-limit deferrals do not emit repeated first-evaluation samples.
+A single `System task first evaluation` information log also carries task and
+workflow ids, scheduled and observed epoch-millisecond UTC timestamps, and the
+raw delay (including a negative value if clocks disagree). This supports exact
+workflow correlation through the existing logs independently of metric dashboards.
+
+The new metrics use existing collection and export paths without extra queue or
+datastore requests. Deploy and benchmark in staging before promotion. This
+change does not directly repair any existing environment; confirmed absent
+references are retired naturally only when the updated worker polls them.

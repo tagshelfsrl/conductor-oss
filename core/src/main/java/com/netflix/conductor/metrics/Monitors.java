@@ -183,6 +183,49 @@ public class Monitors {
                 .record(queueWaitTime, TimeUnit.MILLISECONDS);
     }
 
+    /** Bounded system-task labels only; task/workflow identifiers never become metric labels. */
+    public static void recordSystemTaskPhase(
+            String taskType, String phase, String outcome, long durationNanos) {
+        try {
+            getTimer(
+                            classQualifier,
+                            "system_task_phase",
+                            "taskType",
+                            taskType,
+                            "phase",
+                            phase,
+                            "outcome",
+                            outcome)
+                    .record(durationNanos, TimeUnit.NANOSECONDS);
+        } catch (RuntimeException ignored) {
+            // Observability must not prevent execution or turn a successful queue removal into
+            // retry.
+        }
+    }
+
+    public static void recordSystemTaskFirstEvaluationDelay(String taskType, long durationMs) {
+        try {
+            getTimer(classQualifier, "system_task_first_evaluation_delay", "taskType", taskType)
+                    .record(durationMs, TimeUnit.MILLISECONDS);
+        } catch (RuntimeException ignored) {
+            // The JOIN mapper's startTime is not its first executor evaluation.
+        }
+    }
+
+    public static void recordSystemTaskPoll(
+            String taskType, int availableSlots, int polled, String outcome, long durationNanos) {
+        try {
+            recordSystemTaskPhase(taskType, "poll", outcome, durationNanos);
+            getDistributionSummary(
+                            classQualifier, "system_task_available_slots", "taskType", taskType)
+                    .record(Math.max(0, availableSlots));
+            getDistributionSummary(classQualifier, "system_task_poll_batch", "taskType", taskType)
+                    .record(polled);
+        } catch (RuntimeException ignored) {
+            // Poll capacity is observed without scanning queues or adding datastore requests.
+        }
+    }
+
     public static void recordTaskExecutionTime(
             String taskType, long duration, boolean includesRetries, TaskModel.Status status) {
         getTimer(

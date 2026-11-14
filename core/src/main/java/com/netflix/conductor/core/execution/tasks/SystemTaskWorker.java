@@ -209,25 +209,31 @@ public class SystemTaskWorker extends LifecycleAwareComponent {
         // immediately dispatch. Cap at systemTaskMaxPollCount (the batch size knob); values < 1
         // historically mean "no explicit cap" — do not stall polling for such configs.
         int maxPollCount = properties.getSystemTaskMaxPollCount();
-        int batchSize = semaphoreUtil.availableSlots();
+        int availableSlots = semaphoreUtil.availableSlots();
+        int batchSize = availableSlots;
         if (maxPollCount > 0) {
             batchSize = Math.min(batchSize, maxPollCount);
         }
         if (batchSize <= 0) {
             Monitors.recordSystemTaskWorkerPollingLimited(queueName);
+            Monitors.recordSystemTaskPoll(taskName, availableSlots, 0, "limited", 0);
             return false;
         }
 
         List<String> polledTaskIds;
+        long pollStarted = System.nanoTime();
         try {
             polledTaskIds = queueDAO.pop(queueName, batchSize, queuePopTimeout);
         } catch (Exception e) {
+            Monitors.recordSystemTaskPoll(taskName, availableSlots, 0, "failed", System.nanoTime() - pollStarted);
             // Poll failed — no permits were held, nothing to release.
             Monitors.recordTaskPollError(taskName, e.getClass().getSimpleName());
             LOGGER.error("Error polling system task in queue:{}", queueName, e);
             return false;
         }
 
+        Monitors.recordSystemTaskPoll(taskName, availableSlots, polledTaskIds.size(),
+                polledTaskIds.isEmpty() ? "empty" : "acquired", System.nanoTime() - pollStarted);
         Monitors.recordTaskPoll(queueName);
         LOGGER.debug(
                 "Polling queue:{}, batchSize:{}, got:{}",
@@ -285,7 +291,7 @@ public class SystemTaskWorker extends LifecycleAwareComponent {
                     // the sweeper's repair does not re-queue it (issue #1321). The executor
                     // extends its visibility before invoking and removes it on completion.
                     CompletableFuture.runAsync(
-                                    () -> asyncSystemTaskExecutor.execute(systemTask, taskId),
+                                    () -> asyncSystemTaskExecutor.execute(systemTask, taskId, queueName),
                                     executorService)
                             .whenComplete((r, e) -> semaphoreUtil.completeProcessing(1));
                 } finally {
