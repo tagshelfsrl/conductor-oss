@@ -31,7 +31,7 @@ RUN corepack enable && \
 # ===========================================================================================================
 # 1. Serve stage
 # ===========================================================================================================
-FROM nginx:stable-alpine
+FROM nginx:1.30.7-alpine
 LABEL maintainer="Orkes OSS <oss@orkes.io>"
 
 # Upstream conductor server for /api and /actuator; override at runtime.

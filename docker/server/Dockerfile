@@ -58,12 +58,13 @@ RUN if [ "$SKIP_UI" = "true" ]; then \
 # ===========================================================================================================
 # 2. Final stage
 # ===========================================================================================================
-FROM debian:stable-slim
+FROM debian:trixie-slim
 
 LABEL maintainer="Orkes OSS <oss@orkes.io>"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openjdk-21-jre-headless nginx curl ca-certificates \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' nginx)" ge 1.26.3-3+deb13u11 \
     && rm -f /etc/nginx/sites-enabled/default \
     && rm -rf /var/lib/apt/lists/*
 
